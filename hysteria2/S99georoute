@@ -1,0 +1,93 @@
+#!/bin/sh
+# Route Russian destinations directly for clients assigned to the Hwave policy.
+# Keep all other destinations on the existing H-wave route.
+
+PATH=/opt/bin:/opt/sbin:/usr/bin:/usr/sbin:/bin:/sbin
+LOCK=/tmp/georoute.lock
+DATA=/opt/var/georoute
+LOG=/opt/var/log/georoute.log
+
+load_set() {
+    name=$1
+    family=$2
+    url=$3
+    min_lines=$4
+    file="$DATA/$name.zone"
+    temp="$DATA/$name.download"
+    commands="$DATA/$name.restore"
+
+    curl -fLsS --connect-timeout 15 --max-time 90 "$url" -o "$temp" || return 1
+    [ "$(wc -l < "$temp")" -ge "$min_lines" ] || return 1
+    ipset -exist create "$name" hash:net family "$family" hashsize 16384 maxelem 65536 || return 1
+    ipset -exist create "${name}_new" hash:net family "$family" hashsize 16384 maxelem 65536 || return 1
+    ipset flush "${name}_new" || return 1
+    awk -v set="${name}_new" '{print "add " set " " $1}' "$temp" > "$commands"
+    if [ "$family" = inet ]; then
+        for cidr in 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 127.0.0.0/8 169.254.0.0/16; do
+            printf 'add %s %s\n' "${name}_new" "$cidr" >> "$commands"
+        done
+    fi
+    ipset restore < "$commands" || return 1
+    ipset swap "$name" "${name}_new" || return 1
+    mv "$temp" "$file"
+    rm -f "$commands"
+}
+
+apply_rules() {
+    for table in nat mangle; do
+        if iptables -t "$table" -S hwave >/dev/null 2>&1 && ipset list ru_geo4 >/dev/null 2>&1; then
+            iptables -t "$table" -C hwave -m set --match-set ru_geo4 dst -j RETURN >/dev/null 2>&1 ||
+                iptables -t "$table" -I hwave 1 -m set --match-set ru_geo4 dst -j RETURN
+        fi
+        if ip6tables -t "$table" -S hwave >/dev/null 2>&1 && ipset list ru_geo6 >/dev/null 2>&1; then
+            ip6tables -t "$table" -C hwave -m set --match-set ru_geo6 dst -j RETURN >/dev/null 2>&1 ||
+                ip6tables -t "$table" -I hwave 1 -m set --match-set ru_geo6 dst -j RETURN
+        fi
+    done
+}
+
+remove_rules() {
+    for table in nat mangle; do
+        iptables -t "$table" -D hwave -m set --match-set ru_geo4 dst -j RETURN 2>/dev/null
+        ip6tables -t "$table" -D hwave -m set --match-set ru_geo6 dst -j RETURN 2>/dev/null
+    done
+}
+
+case "$1" in
+    start)
+        mkdir -p "$DATA" /opt/var/log
+        if [ ! -d "$LOCK" ]; then
+            "$0" run >> "$LOG" 2>&1 &
+        fi
+        ;;
+    run)
+        mkdir "$LOCK" 2>/dev/null || exit 0
+        echo $$ > "$LOCK/pid"
+        trap 'rm -f "$LOCK/pid"; rmdir "$LOCK"' EXIT
+        trap 'exit 0' HUP INT TERM
+        next_update=0
+        while :; do
+            now=$(date +%s)
+            if [ "$now" -ge "$next_update" ]; then
+                if load_set ru_geo4 inet https://www.ipdeny.com/ipblocks/data/countries/ru.zone 5000 &&
+                   load_set ru_geo6 inet6 https://www.ipdeny.com/ipv6/ipaddresses/blocks/ru.zone 100; then
+                    next_update=$((now + 86400))
+                    echo "$(date): GeoIP lists updated"
+                else
+                    next_update=$((now + 3600))
+                    echo "$(date): GeoIP update failed; keeping previous sets"
+                fi
+            fi
+            apply_rules
+            sleep 30
+        done
+        ;;
+    stop)
+        [ -f "$LOCK/pid" ] && kill "$(cat "$LOCK/pid")" 2>/dev/null
+        remove_rules
+        ;;
+    status)
+        [ -f "$LOCK/pid" ] && kill -0 "$(cat "$LOCK/pid")" 2>/dev/null && echo running || echo stopped
+        ;;
+    *) echo 'Usage: S99georoute {start|stop|status}' ; exit 1 ;;
+esac
