@@ -1,79 +1,30 @@
-# AmneziaWG 3.1 on Keenetic / Netcraze with Entware
+# AmneziaWG 3.1 in KeeneticOS
 
-[Русский](README.ru.md)
+[Русский](README.ru.md) · [Entware method](ENTWARE.en.md)
 
-This guide follows [Amnezia Netcraze](https://github.com/Parsefall/amnezia-netcraze). Its author tested the package on a Netcraze Giga NC-1012, hardware revision `1210C000`, firmware `5.1.5 / 5.01.C.5.0-0`, and kernel `4.9-ndm-5`. It runs AmneziaWG 3.1 through `/dev/net/tun` without a third-party kernel module. Other router models and firmware versions have not been verified.
+KeeneticOS supports AmneziaWG 3.1 natively starting with **5.2 Alpha 11**. Amnezia's [model list and full guide](https://docs.amnezia.org/ru/documentation/instructions/keenetic-os-awg/) include Keenetic Giga KN-1012 and Netcraze Giga NC-1012. You set up the connection in the router's web interface; Entware is not required.
 
-## Check the router first
+Version 5.2 Alpha 11 is available through the developer update channel. A development build may be less stable than your current firmware. If you already run a supported version, go straight to the component installation. On older firmware, decide whether to update first. The [Entware build](ENTWARE.en.md) was tested by its author only on one NC-1012 running firmware 5.1.5; it is not a general replacement for the native feature.
 
-You need ARM64 (`aarch64`), Entware mounted at `/opt`, root access to its SSH shell, and `/dev/net/tun`. Leave room for Python, the application, and backups. The tested router has 512 MiB of RAM; the project does not state a minimum.
+## Prepare
 
-Find the router model and firmware version in its web interface. In the **Entware shell**, run:
+1. Check the router model and KeeneticOS version in the web interface.
+2. Download both `firmware` and `startup-config` from system settings. On newer versions, they are on the Files tab.
+3. Before moving to the developer channel, review the [current build's known issues](https://forum.keenetic.ru/) and disable automatic updates so a later development build is not installed without your involvement.
+4. Amnezia Premium users can get a client `.conf` from their account. For Self-hosted, create a separate AmneziaWG client for the router in AmneziaVPN, share that connection, and choose **Original AmneziaWG format**. A `vpn://…` key or `.vpn` file is not the format for native import. Keep the `.conf` private; it contains a private key.
 
-```sh
-uname -m
-uname -r
-ls -l /dev/net/tun
-df -h /opt
-free -m
-opkg --version
-```
+## Create the connection
 
-An Entware prompt usually looks like `~ #`. The KeeneticOS `(config)>` prompt is a different command line; run the `opkg`, `tar`, and `sh` commands below in Entware. The Entware SSH port depends on your setup. The [Keenetic example](https://support.keenetic.ru/giga/kn-1012/ru/20980-installing-the-entware-repository-on-a-usb-drive.html) uses `222`; it can be `22` when the separate KeeneticOS SSH server is absent.
+1. In System settings, open the component list, find **WireGuard VPN**, and install it with Update NDMS. Wait for installation and any required reboot.
+2. Under Internet → Other connections, choose Upload from file and select the client `.conf`.
+3. Enable Use for internet access, save, then turn the connection on.
 
-If Entware is missing, follow Keenetic's [USB installation guide](https://support.keenetic.ru/giga/kn-1012/ru/20980-installing-the-entware-repository-on-a-usb-drive.html). KN-1012 also has an [internal storage guide](https://support.keenetic.ru/giga/kn-1012/ru/18482-installing-opkg-entware-in-the-router-s-internal-memory.html). These guides install Entware; they do not establish AWG 3.1 compatibility with other firmware.
+For a first test, leave the regular ISP connection above WireGuard in the default policy. Create a separate policy containing WireGuard, assign one device to it, and check the device's public IP and website access. If the policy contains only WireGuard, the device loses internet when the VPN fails. Adding the ISP connection in second place keeps a fallback path but may send traffic directly if the VPN fails. Assign more devices after the test.
 
-Back up the router configuration. Keep the regular ISP connection working until you have tested the VPN.
+## DNS and IPv6
 
-## Get an AmneziaWG client profile
+In [step 1 of Amnezia's guide](https://docs.amnezia.org/ru/documentation/instructions/keenetic-os-awg/#шаг-1-настройка-dns), Amnezia recommends adding public DNS servers, optionally ignoring ISP DNS, and disabling IPv6 on the main connection. These changes affect the whole home network. For a first test on one device, set up the connection and policy above; then adjust DNS and IPv6 for the routing scheme you choose.
 
-Create a separate Amnezia client for the router. Export its `.vpn` file, a `.txt` file containing the full `vpn://…` key, or copy the key itself. Do not use the same client profile on the router and a phone at the same time. A subscription key or a `PrivateKey` alone cannot be imported. Keep the profile and full key out of issues and terminal logs.
+For domain-based routing, follow the DNS Routes section of Amnezia's guide. Devices must use the router's DNS: custom DNS, Private DNS, and browser DNS-over-HTTPS bypass those rules. If the VPN carries only IPv4, IPv6 left enabled on the main connection may go out directly. Test both IP families before moving all devices.
 
-## Install the package
-
-On your computer, download `awg3-netcraze-arm64-userspace.tar.gz` and its `.sha256` file from the [latest release](https://github.com/Parsefall/amnezia-netcraze/releases/latest). On macOS, calculate the checksum and compare it with the published file:
-
-```sh
-shasum -a 256 awg3-netcraze-arm64-userspace.tar.gz
-cat awg3-netcraze-arm64-userspace.tar.gz.sha256
-```
-
-Copy the archive to the router. Replace the example address and port with yours:
-
-```sh
-scp -O -P 222 awg3-netcraze-arm64-userspace.tar.gz root@192.168.1.1:/opt/tmp/
-ssh -p 222 root@192.168.1.1
-```
-
-Run the following in the Entware shell. Stop if a command fails:
-
-```sh
-opkg update
-opkg install python3-light python3-codecs python3-openssl python3-email python3-urllib python3-logging openssl-util ca-bundle
-mkdir -p /opt/tmp/awg3-setup
-tar -xzf /opt/tmp/awg3-netcraze-arm64-userspace.tar.gz -C /opt/tmp/awg3-setup
-cd /opt/tmp/awg3-setup/awg3-userspace
-sh router/install.sh
-sh router/install-web.sh
-```
-
-These commands come from the [package author's installation guide](https://github.com/Parsefall/amnezia-netcraze/blob/main/INSTALL.md). No profile has been imported or route changed at this point.
-
-## Set up the web panel and tunnel
-
-Replace the router address and home network below with yours. The panel prompts for a password; record the displayed certificate fingerprint.
-
-```sh
-/opt/bin/python3 /opt/lib/awg3/web/server.py --setup --bind 192.168.1.1 --network 192.168.1.0/24 --port 8088
-/opt/etc/init.d/S101awg3-web enable
-```
-
-Open `https://192.168.1.1:8088` from your home network and check the self-signed certificate fingerprint. In the panel, open **Tunnels**, add a tunnel, and upload the `.vpn` or `.txt` file. You can also paste the full `vpn://…` key. Choose **Create and start**. HTTP works on the same port, but sends the password and profile without encryption.
-
-## Route traffic through the VPN
-
-Starting a tunnel does not move any devices to the VPN. The application creates an `OpkgTunN` interface. Assign the devices you want to that connection in Keenetic's routing settings. `AllowedIPs` in the profile does not add KeeneticOS routes. Imported DNS settings are not applied automatically, and the project does not route IPv6 through the VPN. See the project's [routing guide](https://github.com/Parsefall/amnezia-netcraze/blob/main/docs/ROUTING.md).
-
-On an assigned device, turn off any VPN running on the device itself, then check its public IP and website access. After that, enable tunnel autostart in the panel, save the KeeneticOS configuration, and test again after reboot. Set up PingCheck separately if you need connection monitoring.
-
-If installation or the tunnel fails, start with the project's [troubleshooting guide](https://github.com/Parsefall/amnezia-netcraze/blob/main/docs/TROUBLESHOOTING.md). For another router model, find a build for its architecture and firmware first. A prebuilt `amneziawg.ko` for another kernel may not load on your router.
+Save the router configuration and repeat the connection test after reboot.
