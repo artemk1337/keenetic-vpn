@@ -4,6 +4,8 @@
 
 KeeneticOS supports AmneziaWG 3.1 natively starting with **5.2 Alpha 11**. Amnezia's [model list and full guide](https://docs.amnezia.org/ru/documentation/instructions/keenetic-os-awg/) include Keenetic Giga KN-1012 and Netcraze Giga NC-1012. You set up the connection in the router's web interface; Entware is not required.
 
+The component is named **WireGuard VPN** in the router's menu, but you must import an AmneziaWG 3.1 profile. A plain WireGuard profile lacks AmneziaWG obfuscation settings. This runs the AWG protocol on the router; it does not install the AmneziaVPN application. If you only have a `vpn://…` key or `.vpn` export, obtain a client `.conf` in Original AmneziaWG format from Amnezia.
+
 Version 5.2 Alpha 11 is available through the developer update channel. A development build may be less stable than your current firmware. If you already run a supported version, go straight to the component installation. On older firmware, decide whether to update first. The [Entware build](ENTWARE.en.md) was tested by its author only on one NC-1012 running firmware 5.1.5; it is not a general replacement for the native feature.
 
 ## Prepare
